@@ -20,7 +20,7 @@
       padding: 1rem;
       background: #222;
     }
-    form input, form textarea, form button, #inicio input, #inicio button {
+    form input, form textarea, form button, form select, #inicio input, #inicio button {
       margin: 0.5rem 0;
       padding: 0.8rem;
       font-size: 1.2rem;
@@ -66,10 +66,29 @@
     #formulario {
       display: none;
     }
+    #total {
+      padding: 1rem;
+      background: #000;
+      font-size: 1.8rem;
+    }
+    #acciones {
+      display: flex;
+      justify-content: space-around;
+      padding: 1rem;
+      background: #111;
+    }
+    #acciones button {
+      padding: 0.8rem 1.5rem;
+      font-size: 1.2rem;
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      cursor: pointer;
+    }
   </style>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyC5A7yk4XTeoPgrxODuAivcPh_h7KR0cLU",
@@ -85,27 +104,91 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     const pedidosRef = ref(db, 'pedidos');
+    const historialRef = ref(db, 'historial');
 
-    // Mostrar en pantalla
+    const precios = {
+      "Chesse Boom": { Simple: 5500, Doble: 6500 },
+      "Boom":        { Simple: 5500, Doble: 6500 },
+      "Clásica":     { Simple: 5000, Doble: 6000 },
+      "Mix Boom":    { Simple: 5500, Doble: 6500 },
+      "Mexicana":    { Simple: 5500, Doble: 6500 }
+    };
+
+    let totalVendido = 0;
     const pedidosDiv = document.getElementById('pedidos');
+    const totalDiv = document.createElement('div');
+    totalDiv.id = 'total';
+    totalDiv.textContent = 'Total vendido: $0';
+    document.body.appendChild(totalDiv);
+
+    const calcularBtn = document.createElement('button');
+    calcularBtn.textContent = 'Calcular Total';
+    calcularBtn.onclick = () => {
+      alert(`Total vendido hoy: $${totalVendido}`);
+    };
+
+    const limpiarBtn = document.createElement('button');
+    limpiarBtn.textContent = 'Limpiar Pantalla';
+    limpiarBtn.onclick = () => {
+      const pedidos = document.querySelectorAll('.pedido');
+      pedidos.forEach(p => pedidosDiv.removeChild(p));
+    };
+
+    const accionesDiv = document.createElement('div');
+    accionesDiv.id = 'acciones';
+    accionesDiv.appendChild(calcularBtn);
+    accionesDiv.appendChild(limpiarBtn);
+    document.body.appendChild(accionesDiv);
+
+     import { remove, child, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
     onChildAdded(pedidosRef, (data) => {
       const pedido = data.val();
+      const key = data.key;
+
       const div = document.createElement('div');
       div.className = 'pedido';
+      div.dataset.key = key;
       div.innerHTML = `
         <strong>Pedido #${pedido.numero}</strong><br>
         <strong>${pedido.producto}</strong><br>
+        ${pedido.tipo ? `<strong>Tipo: ${pedido.tipo}</strong><br>` : ''}
         ${pedido.nota ? `<em>Obs: ${pedido.nota}</em><br>` : ''}
         ${pedido.aderezos ? `<small>Aderezos: ${pedido.aderezos}</small><br>` : ''}
         <button class="boton-listo">✓ Listo</button>
       `;
+
       div.querySelector('button').addEventListener('click', () => {
         div.classList.toggle('listo');
+        if (div.classList.contains('listo')) {
+          const precio = precios[pedido.producto]?.[pedido.tipo] || 0;
+          totalVendido += precio;
+          totalDiv.textContent = `Total vendido: $${totalVendido}`;
+          push(historialRef, pedido);
+        } else {
+          const precio = precios[pedido.producto]?.[pedido.tipo] || 0;
+          totalVendido -= precio;
+          totalDiv.textContent = `Total vendido: $${totalVendido}`;
+        }
       });
+
       pedidosDiv.prepend(div);
     });
 
-    // Manejo del formulario
+    limpiarBtn.onclick = async () => {
+      const pedidos = document.querySelectorAll('.pedido');
+      pedidos.forEach(p => pedidosDiv.removeChild(p));
+
+      // borrar de Firebase los que no estén en historial
+      const snapshot = await get(pedidosRef);
+      snapshot.forEach(childSnap => {
+        const val = childSnap.val();
+        const match = [...document.querySelectorAll('.pedido')].find(div => div.dataset.key === childSnap.key);
+        if (!match) {
+          remove(child(pedidosRef, childSnap.key));
+        }
+      });
+    };
     window.addEventListener('DOMContentLoaded', () => {
       const inicio = document.getElementById('inicio');
       const formulario = document.getElementById('formulario');
@@ -132,7 +215,8 @@
       formulario.addEventListener('submit', function (e) {
         e.preventDefault();
 
-        const producto = document.getElementById('producto').value.toUpperCase();
+        const producto = document.getElementById('producto').value;
+        const tipo = document.getElementById('tipo').value;
         const nota = document.getElementById('nota').value;
         const aderezosSeleccionados = Array.from(document.querySelectorAll('input[name="aderezo"]:checked'))
           .map(el => el.value)
@@ -141,6 +225,7 @@
         push(pedidosRef, {
           numero: numeroPedido,
           producto,
+          tipo,
           nota,
           aderezos: aderezosSeleccionados
         });
@@ -164,7 +249,19 @@
       <button id="comenzar">Continuar</button>
     </div>
     <form id="formulario">
-      <input type="text" id="producto" placeholder="Producto" required />
+      <select id="producto" required>
+        <option value="">-- Seleccionar Hamburguesa --</option>
+        <option value="Chesse Boom">Chesse Boom</option>
+        <option value="Boom">Boom</option>
+        <option value="Clásica">Clásica</option>
+        <option value="Mix Boom">Mix Boom</option>
+        <option value="Mexicana">Mexicana</option>
+      </select>
+      <select id="tipo" required>
+        <option value="">-- Simple o Doble --</option>
+        <option value="Simple">Simple</option>
+        <option value="Doble">Doble</option>
+      </select>
       <textarea id="nota" placeholder="Observaciones (opcional)"></textarea>
       <div class="aderezos">
         <label><input type="checkbox" name="aderezo" value="Mayonesa"> Mayonesa</label>
